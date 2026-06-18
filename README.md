@@ -175,29 +175,6 @@ ARO's config operator watches `pull-secret` and automatically restores `arosvc.a
 
 However, it does NOT restore Red Hat registries (`quay.io`, `registry.redhat.io`, `registry.connect.redhat.com`) - those come from install-config, not runtime management.
 
-## Phase 3: The Recommended Solution (PushSecret)
-
-See [PHASE3-PUSHSECRET-SOLUTION.md](./PHASE3-PUSHSECRET-SOLUTION.md) for the recommended approach using ESO's PushSecret feature.
-
-**Key benefit:** PushSecret automatically syncs ARO's pull-secret changes TO Vault, eliminating the manual monitoring requirement from Phase 2.
-
-**Architecture:**
-```
-ARO updates pull-secret
-    ↓
-PushSecret auto-syncs TO Vault (every 30s)
-    ↓
-Platform credentials stay current in Vault
-    +
-Customer credentials (stored separately)
-    ↓
-Merge in Vault
-    ↓
-ExternalSecret pulls merged result back
-```
-
-This solves the fragility issue - ARO credential rotations are automatically captured.
-
 ## Related
 
 - JIRA: ARO-25475
