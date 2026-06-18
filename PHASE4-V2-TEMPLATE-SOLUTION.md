@@ -1,8 +1,41 @@
-# Phase 4: Template Engine v2 Solution 
+# Phase 4: Template Engine v2 Solution ⚠️ BROKEN - SYNC LOOP
 
-## Overview
+## ⚠️ CRITICAL ISSUE: This Solution Does Not Work
 
-This phase demonstrates another solution using ESO's template engine v2 to merge credentials directly in the ExternalSecret. This eliminates the manual merge step from Phase 3.
+**Testing revealed a sync loop that prevents customer credential updates from working.**
+
+### The Problem
+
+When using PushSecret + ExternalSecret with v2 template merge, a circular dependency occurs:
+
+1. **PushSecret** syncs `pull-secret` → Vault `platform-pull-secret-auto`
+2. `pull-secret` already contains **BOTH** platform + customer registries (from the ExternalSecret merge)
+3. So `platform-pull-secret-auto` in Vault now has **customer registries with OLD tokens**
+4. Customer updates their credentials in Vault `customer-only-registry`
+5. ExternalSecret template merges `platform-pull-secret-auto` + `customer-only-registry`
+6. The `merge` function gives **platform precedence**, so old customer tokens win
+7. **Customer credential rotations are ignored!**
+
+### Test Results
+
+```bash
+# Customer rotates credential in Vault
+Vault customer-only-registry: "ROTATED:new-customer-password"
+
+# But pull-secret still has old token
+pull-secret: "newcustomer:password"  # OLD TOKEN!
+
+# Because PushSecret put stale customer data in platform path
+platform-pull-secret-auto: "newcustomer:password"  # STALE!
+```
+
+**Root cause**: PushSecret cannot distinguish between platform and customer registries, so it syncs everything. The merge template then prioritizes the stale platform data over fresh customer data.
+
+## Overview (Original Intent)
+
+This phase was intended to demonstrate using ESO's template engine v2 to merge credentials directly in the ExternalSecret, eliminating the manual merge step from Phase 3.
+
+**Status:** ❌ Does not work due to sync loop
 
 ## Architecture
 
@@ -417,11 +450,55 @@ oc get secret pull-secret -n openshift-config
 
 ## Conclusion
 
-It combines:
-- ✅ PushSecret (Phase 3) for automatic platform credential sync
-- ✅ Template v2 for native merge in ESO
-- ✅ No external scripts, CronJobs, or custom operators
-- ✅ Fully declarative YAML
-- ✅ Works with ESO v0.9.11+ (already widely deployed)
+**❌ This solution does NOT work due to the sync loop.**
 
-This solution eliminates the "merge automation" gap from Phase 3.
+While the template engine v2 merge technically works, the combination with PushSecret creates a circular dependency that makes customer credential updates impossible.
+
+### What Works
+- ✅ Template v2 merge syntax and functions work correctly
+- ✅ ESO v0.9.11 supports engineVersion: v2
+- ✅ Initial merge succeeds
+
+### What Doesn't Work
+- ❌ Customer credential rotations are ignored
+- ❌ PushSecret syncs merged result back, polluting platform path
+- ❌ Merge precedence rules cause stale customer data to win
+- ❌ No way to filter PushSecret to only sync platform registries
+
+### Sync Loop Diagram
+
+```
+Customer updates Vault customer-only-registry with NEW token
+    ↓
+ExternalSecret pulls platform-pull-secret-auto (has OLD customer token) + customer-only-registry (has NEW token)
+    ↓
+Template merge gives platform precedence → OLD token wins
+    ↓
+pull-secret updated with OLD customer token
+    ↓
+PushSecret sees pull-secret changed
+    ↓
+PushSecret syncs pull-secret → platform-pull-secret-auto (now has OLD customer token)
+    ↓
+LOOP: Customer token never updates
+```
+
+### Possible Solutions (Not Tested)
+
+1. **Reverse merge precedence**
+   - `merge $customer.auths $platform.auths` (customer wins)
+   - Risk: Customer could break platform if they add platform registries
+
+2. **PushSecret with filtering (if ESO supports it)**
+   - Only push specific registry keys (arosvc, quay, registry.redhat.io)
+   - Requires ESO PushSecret to support key-level filtering
+
+3. **Watch ARO's source secret, not pull-secret**
+   - If ARO maintains the original platform secret elsewhere
+   - PushSecret watches that instead of the merged pull-secret
+
+4. **Don't use PushSecret**
+   - Back to Phase 2/3 - manually maintain platform credentials
+   - Defeats the purpose of automation
+
+**Recommendation**: Discuss sync loop issue with ESO PM. This is a fundamental architectural problem with combining PushSecret + ExternalSecret on the same target secret.
