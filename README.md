@@ -1,4 +1,4 @@
-# ARO Pull-Secret with ESO and Vault - Real Reproducer
+# ARO Pull-Secret with ESO and Vault Reproducer
 
 Demonstrates the pull-secret management challenge in Azure Red Hat OpenShift when using External Secrets Operator with HashiCorp Vault.
 
