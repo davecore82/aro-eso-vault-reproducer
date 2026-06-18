@@ -167,7 +167,7 @@ ESO: Syncing every 30 seconds ✅
 - Manually update Vault
 - Repeat every time ARO rotates
 
-**This defeats the purpose of automation!**
+This defeats the purpose of automation.
 
 ## Why ARO Auto-Restores arosvc.azurecr.io
 
