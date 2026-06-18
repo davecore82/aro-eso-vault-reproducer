@@ -175,24 +175,6 @@ ARO's config operator watches `pull-secret` and automatically restores `arosvc.a
 
 However, it does NOT restore Red Hat registries (`quay.io`, `registry.redhat.io`, `registry.connect.redhat.com`) - those come from install-config, not runtime management.
 
-## What's Needed
-
-A solution that:
-- Separates platform credentials (ARO-managed)
-- Separates customer credentials (ESO-managed)
-- Auto-merges them
-- No manual intervention when either side rotates
-
-Reference: HyperShift's `additional-pull-secret` pattern solves this.
-
-## Files in This Repo
-
-- `vault-setup.yaml` - Vault deployment manifests
-- `eso-setup.yaml` - External Secrets Operator setup
-- `phase1-customer-only.yaml` - ExternalSecret that breaks
-- `phase2-combined.yaml` - ExternalSecret with workaround
-- `test-demo.sh` - Script to run the full demonstration
-
 ## Related
 
 - JIRA: ARO-25475
