@@ -466,20 +466,25 @@ cat > /tmp/new-customer-creds.json <<EOF
 
 ### Live Test Log
 
+**Test 1: Initial Merge**
 ```
-=== Test 1: Initial Merge ===
 Platform registries: 4 (cloud.openshift.com, quay.io, registry.connect.redhat.com, registry.redhat.io)
 Customer registries: 1 (mycustomer.azurecr.io)
 Merged result: 5 total registries ✅
+```
 
-=== Test 2: Customer Credential Rotation ===
+**Test 2: Customer Credential Rotation**
+```
 Rotated customer credentials to 2 registries:
 - mycustomer.azurecr.io (updated password)
 - anothercustomer.azurecr.io (new registry)
 
 CronJob detected change in: 58 seconds
 Merged result: 6 total registries ✅
-Final verification:
+```
+
+**Final verification:**
+```json
 [
   "anothercustomer.azurecr.io",
   "cloud.openshift.com",
