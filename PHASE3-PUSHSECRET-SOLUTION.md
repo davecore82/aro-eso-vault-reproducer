@@ -261,3 +261,190 @@ PushSecret solves the **manual monitoring problem** from Phase 2. The only remai
 - Vault Enterprise features (if available)
 - Custom operator/controller (if needed at scale)
 
+
+---
+
+## CronJob Automation Solution (Tested)
+
+The merge step can be fully automated with a Kubernetes CronJob that runs every 1 minute.
+
+### Architecture
+
+```
+PushSecret (every 30s)
+    ↓
+platform-pull-secret-auto (auto-updated)
+         +
+customer-only-registry (customer managed)
+         ↓
+CronJob (every 1 min) - merges both
+         ↓
+  final-merged (result)
+         ↓
+ExternalSecret (every 30s)
+         ↓
+   pull-secret
+```
+
+### Benefits
+
+✅ **Fully automated** - No manual intervention after setup  
+✅ **No sync loop** - CronJob writes to separate `final-merged` path  
+✅ **Fast updates** - Customer credential changes reflected within 1-2 minutes  
+✅ **Platform updates** - ARO rotations auto-synced and merged  
+✅ **Simple** - Just bash + jq in a pod  
+
+### CronJob Implementation
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-merge
+  namespace: vault
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-token-cronjob
+  namespace: vault
+type: Opaque
+stringData:
+  token: root  # Use your Vault token
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vault-merge-credentials
+  namespace: vault
+spec:
+  schedule: "*/1 * * * *"  # Every 1 minute
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: vault-merge
+        spec:
+          serviceAccountName: vault-merge
+          restartPolicy: OnFailure
+          initContainers:
+          - name: install-tools
+            image: alpine:3.19
+            command:
+            - sh
+            - -c
+            - |
+              apk add --no-cache curl jq
+              curl -sL https://releases.hashicorp.com/vault/1.15.6/vault_1.15.6_linux_amd64.zip -o /tmp/vault.zip
+              cd /tmp && unzip vault.zip && chmod +x vault
+              cp vault /shared/vault
+              cp /usr/bin/jq /shared/jq
+            securityContext:
+              runAsUser: 0
+            volumeMounts:
+            - name: shared
+              mountPath: /shared
+          containers:
+          - name: merge
+            image: alpine:3.19
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "=== Starting credential merge $(date) ==="
+              
+              export PATH=/shared:$PATH
+              export VAULT_ADDR=http://vault.vault.svc.cluster.local:8200
+              export VAULT_TOKEN=$(cat /vault-token/token)
+              
+              echo "Reading platform credentials..."
+              PLATFORM=$(/shared/vault kv get -format=json secret/platform-pull-secret-auto | /shared/jq -r '.data.data[".dockerconfigjson"]')
+              
+              echo "Reading customer credentials..."
+              CUSTOMER=$(/shared/vault kv get -format=json secret/customer-only-registry | /shared/jq -r '.data.data[".dockerconfigjson"]')
+              
+              echo "Merging credentials (platform takes precedence)..."
+              MERGED=$(echo "$PLATFORM" | /shared/jq --argjson customer "$CUSTOMER" '.auths += $customer.auths')
+              
+              echo "Writing merged result to Vault..."
+              echo "$MERGED" > /tmp/merged.json
+              /shared/vault kv put secret/final-merged .dockerconfigjson=@/tmp/merged.json
+              
+              echo "Verification - Registry count:"
+              /shared/vault kv get -format=json secret/final-merged | /shared/jq -r '.data.data[".dockerconfigjson"]' | /shared/jq '.auths | length'
+              
+              echo "=== Merge complete $(date) ==="
+            volumeMounts:
+            - name: vault-token
+              mountPath: /vault-token
+              readOnly: true
+            - name: shared
+              mountPath: /shared
+          volumes:
+          - name: vault-token
+            secret:
+              secretName: vault-token-cronjob
+          - name: shared
+            emptyDir: {}
+```
+
+Apply:
+```bash
+oc apply -f cronjob-merge.yaml
+```
+
+### How It Works
+
+1. **Init Container**: Downloads and installs vault CLI + jq
+2. **Merge Container**: 
+   - Reads `platform-pull-secret-auto` (auto-updated by PushSecret)
+   - Reads `customer-only-registry` (customer managed)
+   - Merges with jq (platform takes precedence on conflicts)
+   - Writes result to `final-merged`
+3. **ExternalSecret**: Pulls from `final-merged` every 30s
+4. **Result**: pull-secret has platform + customer registries
+
+### Testing
+
+```bash
+# Check CronJob is running
+oc get cronjob vault-merge-credentials -n vault
+
+# Check recent job executions
+oc get jobs -n vault | grep vault-merge
+
+# Check job logs
+oc logs -n vault job/<job-name>
+
+# Verify merged credentials in Vault
+oc exec -n vault deployment/vault -- sh -c '
+  export VAULT_ADDR=http://localhost:8200 VAULT_TOKEN=root
+  vault kv get -format=json secret/final-merged
+' | jq -r '.data.data[".dockerconfigjson"]' | jq '.auths | keys'
+
+# Verify pull-secret has merged credentials
+oc get secret pull-secret -n openshift-config \
+  -o jsonpath='{.data.\.dockerconfigjson}' | \
+  base64 -d | jq '.auths | keys'
+```
+
+### Test Customer Credential Rotation
+
+```bash
+# Customer rotates their credential
+cat > /tmp/new-customer-creds.json <<EOF
+{
+  "auths": {
+    "mycustomer.azurecr.io": {
+      "auth": "$(echo -n 'customer:NEW-PASSWORD' | base64)"
+    },
+    "anothercustomer.azurecr.io": {
+      "auth": "$(echo -n 'another:password' | base64)"
+    }
+  }
+}
