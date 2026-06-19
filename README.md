@@ -179,5 +179,3 @@ However, it does NOT restore Red Hat registries (`quay.io`, `registry.redhat.io`
 
 - JIRA: ARO-25475
 - Platform: Azure Red Hat OpenShift
-- Test Date: June 2026
-- Solution suggested by: ESO Product Manager at Red Hat
