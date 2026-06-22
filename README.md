@@ -159,7 +159,7 @@ ESO: Syncing every 30 seconds ✅
 2. Vault still has OLD token
 3. ESO syncs from Vault (30 seconds later)
 4. ESO overwrites with stale credentials
-5. ARO platform operations fail
+5. ARO and ESO then continuously overwrite each other, causing a credential synchronization loop.
 
 **Customer must:**
 - Monitor for ARO credential rotations
