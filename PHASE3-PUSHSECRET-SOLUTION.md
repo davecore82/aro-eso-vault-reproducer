@@ -4,6 +4,13 @@
 
 This solution uses ESO's PushSecret feature combined with a Kubernetes CronJob to fully automate pull-secret management in ARO. It eliminates manual monitoring and maintenance.
 
+**Note**: Is there a potential race condition here? 
+- ARO rotates at T=0
+- ExternalSecret might run at T=15s, overwriting with stale creds
+- PushSecret runs at T=30s, capturing... the stale creds that ExternalSecret just wrote
+
+With both PushSecret and ExternalSecret on 30s intervals, do we risk ExternalSecret overwriting ARO's rotation before PushSecret captures it? Should we have different intervals (PushSecret 1min, ExternalSecret 5min) to give PushSecret time to capture and propagate the rotation before ExternalSecret overwrites?
+
 ## Architecture
 
 ```
